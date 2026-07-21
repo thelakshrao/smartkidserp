@@ -379,7 +379,7 @@ export default function LoginPage() {
               whileHover={{ scale: 1.03 }}
               whileTap={{ scale: 0.97 }}
               type="submit"
-              className="w-full rounded-xl bg-linear-to-r from-[#F5A24A] to-[#EF6C5C] py-2.5 text-sm font-bold text-white shadow-md lg:py-3 lg:text-base"
+              className="w-full rounded-xl bg-linear-to-r from-[#F5A24A] to-[#EF6C5C] py-2.5 text-sm font-bold text-white shadow-md lg:py-3 lg:text-base cursor-pointer"
             >
               LOGIN
             </motion.button>
