@@ -1,15 +1,12 @@
 "use client";
-
 import { useEffect, useState } from "react";
 import Image from "next/image";
 import { motion, AnimatePresence } from "framer-motion";
-
 import logo from "../images/logo.png";
 import hero1 from "../images/hero1.png";
 import hero2 from "../images/hero2.png";
 import hero3 from "../images/hero3.png";
 import hero4 from "../images/hero4.png";
-
 const SLIDES = [
   {
     img: hero1,
@@ -32,34 +29,27 @@ const SLIDES = [
     title: "A campus that travels home with you",
   },
 ];
-
-const SLIDE_DURATION = 4000; 
+const SLIDE_DURATION = 4000;
 const EASE = [0.22, 1, 0.36, 1];
-
 export default function LoginPage() {
   const [current, setCurrent] = useState(0);
   const [showPassword, setShowPassword] = useState(false);
   const [form, setForm] = useState({ userid: "", password: "" });
-
   useEffect(() => {
     const id = setInterval(() => {
       setCurrent((prev) => (prev + 1) % SLIDES.length);
     }, SLIDE_DURATION);
     return () => clearInterval(id);
   }, []);
-
   function handleChange(e) {
     const { name, value } = e.target;
     setForm((f) => ({ ...f, [name]: value }));
   }
-
   function handleSubmit(e) {
     e.preventDefault();
     console.log("login submit", form);
   }
-
   const slide = SLIDES[current];
-
   return (
     <main className="min-h-screen w-full flex items-center justify-center bg-[#2a1810] p-4 sm:p-7">
       <div
@@ -80,24 +70,22 @@ export default function LoginPage() {
               />
             </div>
             <div className="leading-tight">
-              <div className="font-bold text-[19px]">
+              <div className="font-bold text-[15px] sm:text-[19px]">
                 Smart Kids Convent School
               </div>
-              <div className="text-[12.5px] opacity-85 font-medium">
+              <div className="text-[10.5px] sm:text-[12.5px] opacity-85 font-medium">
                 Heera Nagar, Gurugram
               </div>
             </div>
           </div>
-
-          <h1 className="font-extrabold text-[34px] sm:text-[46px] leading-[1.08] mb-3.5 drop-shadow-[0_6px_22px_rgba(0,0,0,0.15)]">
+          <h1 className="font-extrabold text-[26px] sm:text-[46px] leading-[1.08] mb-3.5 drop-shadow-[0_6px_22px_rgba(0,0,0,0.15)]">
             Hey, Hello!
           </h1>
-          <p className="text-[15.5px] max-w-105 opacity-90 font-medium mb-auto">
+          <p className="text-[12.5px] sm:text-[15.5px] max-w-105 opacity-90 font-medium mb-auto">
             Sign in to the Student ERP Portal to track attendance, homework,
             exams and school updates — all in one place.
           </p>
-
-          <div className="relative mt-6 flex-1 flex items-end min-h-47.5">
+          <div className="relative mt-3 sm:mt-6 flex-1 flex items-end min-h-35 sm:min-h-47.5">
             <AnimatePresence mode="wait">
               <motion.div
                 key={current}
@@ -105,13 +93,13 @@ export default function LoginPage() {
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.3 }}
-                className="flex items-end gap-5 w-full"
+                className="flex items-end gap-3 sm:gap-5 w-full"
               >
                 <motion.div
                   initial={{ opacity: 0, x: -80 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ duration: 0.6, ease: EASE, delay: 0.05 }}
-                  className="w-32.5 h-32.5 sm:w-52.5 sm:h-52.5 shrink-0 flex items-end justify-center drop-shadow-[0_18px_20px_rgba(0,0,0,0.25)]"
+                  className="w-22 h-22 sm:w-52.5 sm:h-52.5 shrink-0 flex items-end justify-center drop-shadow-[0_18px_20px_rgba(0,0,0,0.25)]"
                 >
                   <Image
                     src={slide.img}
@@ -121,25 +109,23 @@ export default function LoginPage() {
                     className="max-w-full max-h-full object-contain"
                   />
                 </motion.div>
-
                 <motion.div
                   initial={{ opacity: 0, x: -60 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ duration: 0.6, ease: EASE, delay: 0.15 }}
-                  className="pb-4"
+                  className="pb-2 sm:pb-4"
                 >
-                  <div className="text-[11.5px] font-bold tracking-[1.6px] uppercase opacity-80 mb-1.5">
+                  <div className="text-[8px] sm:text-[11.5px] font-bold tracking-[1.2px] sm:tracking-[1.6px] uppercase opacity-80 mb-1 sm:mb-1.5">
                     {slide.eyebrow}
                   </div>
-                  <div className="font-bold text-[18px] sm:text-[22px] leading-snug max-w-[320px]">
+                  <div className="font-bold text-[11.5px] sm:text-[22px] leading-snug max-w-55 sm:max-w-[320px]">
                     {slide.title}
                   </div>
                 </motion.div>
               </motion.div>
             </AnimatePresence>
           </div>
-
-          <div className="flex gap-2 mt-6">
+          <div className="flex gap-2 mt-3 sm:mt-6">
             {SLIDES.map((_, i) => (
               <div
                 key={i}
@@ -162,7 +148,6 @@ export default function LoginPage() {
             ))}
           </div>
         </div>
-
         <div className="relative flex items-end justify-center px-6 sm:px-9 pt-6 sm:pt-9 pb-0">
           <motion.div
             initial={{ y: "140%", opacity: 0 }}
@@ -180,22 +165,20 @@ export default function LoginPage() {
                 className="object-contain"
               />
             </div>
-
-            <h1 className="font-bold text-[25px] text-[#241a1a] text-center mb-1.5">
+            <h1 className="font-bold text-[20px] sm:text-[25px] text-[#241a1a] text-center mb-1.5">
               Welcome!
             </h1>
-            <p className="text-center text-[13.5px] font-semibold text-[#ed1c24] mb-1">
+            <p className="text-center text-[11.5px] sm:text-[13.5px] font-semibold text-[#ed1c24] mb-1">
               Smart Kids Convent School
             </p>
-            <p className="text-center text-xs text-[#8a7d78] mb-6">
+            <p className="text-center text-[10.5px] sm:text-xs text-[#8a7d78] mb-6">
               Heera Nagar, Gurugram
             </p>
-
             <form onSubmit={handleSubmit}>
               <div className="mb-4">
                 <label
                   htmlFor="userid"
-                  className="block text-xs font-semibold text-[#241a1a] mb-1.5"
+                  className="block text-[10.5px] sm:text-xs font-semibold text-[#241a1a] mb-1.5"
                 >
                   User ID
                 </label>
@@ -208,16 +191,16 @@ export default function LoginPage() {
                   placeholder="Enter your User ID"
                   autoComplete="username"
                   required
-                  className="w-full px-3.5 py-3 rounded-xl border-[1.5px] border-[#eee2da] text-sm bg-[#fff8f1]
+                  className="w-full px-3.5 py-3 rounded-xl border-[1.5px] border-[#eee2da] text-[12.5px] sm:text-sm bg-[#fff8f1]
+                             placeholder:text-[#6b5d56] placeholder:font-medium
                              outline-none transition-colors focus:border-[#f7941d]
                              focus:ring-4 focus:ring-[#f7941d]/20"
                 />
               </div>
-
               <div className="mb-1">
                 <label
                   htmlFor="password"
-                  className="block text-xs font-semibold text-[#241a1a] mb-1.5"
+                  className="block text-[10.5px] sm:text-xs font-semibold text-[#241a1a] mb-1.5"
                 >
                   Password
                 </label>
@@ -231,7 +214,8 @@ export default function LoginPage() {
                     placeholder="Enter your password"
                     autoComplete="current-password"
                     required
-                    className="w-full px-3.5 py-3 rounded-xl border-[1.5px] border-[#eee2da] text-sm bg-[#fff8f1]
+                    className="w-full px-3.5 py-3 rounded-xl border-[1.5px] border-[#eee2da] text-[12.5px] sm:text-sm bg-[#fff8f1]
+                               placeholder:text-[#6b5d56] placeholder:font-medium
                                outline-none transition-colors focus:border-[#f7941d]
                                focus:ring-4 focus:ring-[#f7941d]/20"
                   />
@@ -242,7 +226,7 @@ export default function LoginPage() {
                       showPassword ? "Hide password" : "Show password"
                     }
                     aria-pressed={showPassword}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#8a7d78] p-1
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#8a7d78] p-1 cursor-pointer
                                focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#f7941d] rounded-md"
                   >
                     {showPassword ? (
@@ -277,19 +261,17 @@ export default function LoginPage() {
                   </button>
                 </div>
               </div>
-
               <div className="flex justify-end my-3">
                 <a
                   href="#"
-                  className="text-[12.5px] font-semibold text-[#ed1c24] hover:underline"
+                  className="text-[10.5px] sm:text-[12.5px] font-semibold text-[#ed1c24] hover:underline"
                 >
                   Forgot Password?
                 </a>
               </div>
-
               <button
                 type="submit"
-                className="w-full rounded-xl py-3.5 text-[15px] font-bold tracking-wide text-white
+                className="w-full rounded-xl py-3.5 text-[13px] sm:text-[15px] font-bold tracking-wide text-white cursor-pointer
                            bg-linear-to-br from-[#f7941d] to-[#ed1c24]
                            shadow-[0_12px_20px_-8px_rgba(237,28,36,0.55)]
                            transition-transform hover:-translate-y-0.5 active:translate-y-0
@@ -298,8 +280,7 @@ export default function LoginPage() {
                 Login
               </button>
             </form>
-
-            <div className="text-center mt-5 text-xs text-[#8a7d78]">
+            <div className="text-center mt-5 text-[10.5px] sm:text-xs text-[#8a7d78]">
               Having trouble signing in? <br />
               <strong className="text-[#241a1a]">
                 Contact the school office
