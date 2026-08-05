@@ -10,6 +10,7 @@ import {
   orderBy,
   onSnapshot,
   doc,
+  getDocs,
   updateDoc,
   deleteDoc,
 } from "firebase/firestore";
@@ -26,9 +27,40 @@ import {
   ChevronLeft,
   ChevronRight,
   Loader2,
+  LayoutGrid,
+  BookOpenCheck,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+
+// Canonical class order — used both to sort the list and to order the
+// class filter dropdown ("increasing" order as requested).
+const CLASS_OPTIONS = [
+  "Nursery",
+  "LKG",
+  "UKG",
+  "1",
+  "2",
+  "3",
+  "4",
+  "5",
+  "6",
+  "7",
+  "8",
+  "9",
+  "10",
+  "11-Science",
+  "11-Commerce",
+  "11-Arts",
+  "12-Science",
+  "12-Commerce",
+  "12-Arts",
+];
+
+function classRank(cls) {
+  const idx = CLASS_OPTIONS.indexOf(cls);
+  return idx === -1 ? CLASS_OPTIONS.length : idx;
+}
 
 function formatJoinedDate(ts) {
   if (!ts) return "-";
@@ -48,10 +80,17 @@ function initials(name = "") {
 
 export default function StudentsPage() {
   const { profile } = useAuth?.() || {};
+  const isTeacher = profile?.role === "teacher";
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [classFilter, setClassFilter] = useState("All");
+
+  // "mine" = only the classes this teacher teaches, "all" = every class.
+  // Admins always effectively see "all" (no toggle shown to them).
+  const [viewMode, setViewMode] = useState("mine");
+  const [teacherClasses, setTeacherClasses] = useState([]);
+  const effectiveViewMode = isTeacher ? viewMode : "all";
 
   const [students, setStudents] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -92,13 +131,81 @@ export default function StudentsPage() {
     return () => unsub();
   }, []);
 
+  // Load which classes this teacher should see under "My Classes".
+  // Two sources feed this, matching how the app actually assigns classes:
+  //   1) profile.classIds — classes the teacher was directly assigned to
+  //      teach when their account was created (users/{authUid}.classIds).
+  //   2) classTeachers docs where teacherId === profile.userId — classes
+  //      where this teacher has been made the Class Incharge. Note:
+  //      profile.userId (stored as users/{authUid}.userId) is the same id
+  //      as the teacher's doc in the "teachers" collection, which is what
+  //      setClassTeacher() writes into classTeachers.teacherId.
+  useEffect(() => {
+    async function loadTeacherClasses() {
+      if (!isTeacher) return;
+      try {
+        const classesSet = new Set();
+
+        if (Array.isArray(profile?.classIds)) {
+          profile.classIds.forEach((c) => classesSet.add(c));
+        }
+
+        if (profile?.userId) {
+          const snap = await getDocs(collection(db, "classTeachers"));
+          snap.docs.forEach((d) => {
+            const data = d.data();
+            if (data.teacherId === profile.userId && data.className) {
+              classesSet.add(data.className);
+            }
+          });
+        }
+
+        setTeacherClasses(Array.from(classesSet));
+      } catch (err) {
+        console.error("Failed to load this teacher's assigned classes:", err);
+        setTeacherClasses([]);
+      }
+    }
+    loadTeacherClasses();
+  }, [isTeacher, profile]);
+
+  // Reset the class filter whenever the scope (mine vs all) changes, so a
+  // stale selection from one scope doesn't silently apply to the other.
+  useEffect(() => {
+    setClassFilter("All");
+  }, [viewMode]);
+
+  const hasAssignedClasses = teacherClasses.length > 0;
+
+  // Students within the current scope (before search/status/class filters).
+  const scopedStudents = useMemo(() => {
+    if (isTeacher && effectiveViewMode === "mine" && hasAssignedClasses) {
+      return students.filter((s) => teacherClasses.includes(s.className));
+    }
+    return students;
+  }, [
+    students,
+    isTeacher,
+    effectiveViewMode,
+    teacherClasses,
+    hasAssignedClasses,
+  ]);
+
   const classOptions = useMemo(() => {
-    const set = new Set(students.map((s) => s.className).filter(Boolean));
-    return ["All", ...Array.from(set).sort()];
-  }, [students]);
+    const set = new Set(scopedStudents.map((s) => s.className).filter(Boolean));
+    if (isTeacher && effectiveViewMode === "mine") {
+      // Make sure every class the teacher teaches shows up in the filter,
+      // even if that class currently has zero students.
+      teacherClasses.forEach((c) => set.add(c));
+    }
+    return [
+      "All",
+      ...Array.from(set).sort((a, b) => classRank(a) - classRank(b)),
+    ];
+  }, [scopedStudents, isTeacher, effectiveViewMode, teacherClasses]);
 
   const filteredStudents = useMemo(() => {
-    return students.filter((s) => {
+    const result = scopedStudents.filter((s) => {
       const matchesStatus = statusFilter === "All" || s.status === statusFilter;
       const matchesClass = classFilter === "All" || s.className === classFilter;
       const q = searchQuery.trim().toLowerCase();
@@ -110,17 +217,30 @@ export default function StudentsPage() {
         s.guardianName.toLowerCase().includes(q);
       return matchesStatus && matchesClass && matchesSearch;
     });
-  }, [students, searchQuery, statusFilter, classFilter]);
+
+    // "My Classes" view: show classes in increasing order, as requested.
+    if (isTeacher && effectiveViewMode === "mine") {
+      result.sort((a, b) => classRank(a.className) - classRank(b.className));
+    }
+    return result;
+  }, [
+    scopedStudents,
+    searchQuery,
+    statusFilter,
+    classFilter,
+    isTeacher,
+    effectiveViewMode,
+  ]);
 
   const stats = useMemo(() => {
-    const total = students.length;
-    const active = students.filter((s) => s.status === "Active").length;
+    const total = scopedStudents.length;
+    const active = scopedStudents.filter((s) => s.status === "Active").length;
     const inactive = total - active;
-    const feePending = students.filter(
+    const feePending = scopedStudents.filter(
       (s) => s.feeStatus === "Pending" || s.feeStatus === "Partial",
     ).length;
     return { total, active, inactive, feePending };
-  }, [students]);
+  }, [scopedStudents]);
 
   const router = useRouter();
   const [openMenuId, setOpenMenuId] = useState(null);
@@ -162,7 +282,7 @@ export default function StudentsPage() {
       />
       <div className="flex flex-1">
         <Sidebar
-          dashboardType={profile?.role === "teacher" ? "teacher" : "admin"}
+          dashboardType={isTeacher ? "teacher" : "admin"}
           activeItem="Students"
           mobileOpen={mobileNavOpen}
           onClose={() => setMobileNavOpen(false)}
@@ -185,6 +305,44 @@ export default function StudentsPage() {
               Add Student
             </Link>
           </div>
+
+          {isTeacher && (
+            <div className="bg-white p-3 rounded-2xl border border-gray-100 shadow-sm mb-6 flex flex-col sm:flex-row sm:items-center gap-3">
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={() => setViewMode("mine")}
+                  className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition cursor-pointer ${
+                    viewMode === "mine"
+                      ? "bg-[#ff5722] text-white shadow-sm"
+                      : "bg-gray-50 text-gray-600 border border-gray-200 hover:bg-gray-100"
+                  }`}
+                >
+                  <BookOpenCheck className="w-3.5 h-3.5" />
+                  My Classes
+                </button>
+                <button
+                  onClick={() => setViewMode("all")}
+                  className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition cursor-pointer ${
+                    viewMode === "all"
+                      ? "bg-[#ff5722] text-white shadow-sm"
+                      : "bg-gray-50 text-gray-600 border border-gray-200 hover:bg-gray-100"
+                  }`}
+                >
+                  <LayoutGrid className="w-3.5 h-3.5" />
+                  All Students
+                </button>
+              </div>
+              <span className="text-[11.5px] text-gray-500">
+                {viewMode === "mine"
+                  ? hasAssignedClasses
+                    ? `Showing students of Class ${[...teacherClasses]
+                        .sort((a, b) => classRank(a) - classRank(b))
+                        .join(", ")}.`
+                    : "No classes are assigned to you yet — showing all students. Contact admin to get your classes assigned."
+                  : "Showing students from every class (Nursery to 12th)."}
+              </span>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
             <StatCard
@@ -232,7 +390,9 @@ export default function StudentsPage() {
             <div className="flex items-center gap-3 w-full sm:w-auto justify-end flex-wrap">
               <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 px-3 py-2 rounded-xl text-sm text-gray-700">
                 <Filter className="w-4 h-4 text-gray-500" />
-                <span className="text-xs font-medium text-gray-500">Class:</span>
+                <span className="text-xs font-medium text-gray-500">
+                  Class:
+                </span>
                 <select
                   value={classFilter}
                   onChange={(e) => setClassFilter(e.target.value)}
@@ -246,7 +406,9 @@ export default function StudentsPage() {
                 </select>
               </div>
               <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 px-3 py-2 rounded-xl text-sm text-gray-700">
-                <span className="text-xs font-medium text-gray-500">Status:</span>
+                <span className="text-xs font-medium text-gray-500">
+                  Status:
+                </span>
                 <select
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value)}
@@ -267,7 +429,9 @@ export default function StudentsPage() {
                 Loading students...
               </div>
             ) : error ? (
-              <div className="py-16 text-center text-sm text-rose-600">{error}</div>
+              <div className="py-16 text-center text-sm text-rose-600">
+                {error}
+              </div>
             ) : filteredStudents.length === 0 ? (
               <div className="py-16 text-center text-sm text-gray-500">
                 {students.length === 0
@@ -293,7 +457,10 @@ export default function StudentsPage() {
                     </thead>
                     <tbody className="divide-y divide-gray-100 text-sm">
                       {filteredStudents.map((student) => (
-                        <tr key={student.docId} className="hover:bg-gray-50/50 transition">
+                        <tr
+                          key={student.docId}
+                          className="hover:bg-gray-50/50 transition"
+                        >
                           <td className="py-3.5 px-4 font-medium text-gray-900 text-xs">
                             {student.id}
                           </td>
@@ -350,7 +517,9 @@ export default function StudentsPage() {
                             <div className="flex items-center justify-end gap-1">
                               <button
                                 onClick={() =>
-                                  router.push(`/dashboard/students/${student.docId}`)
+                                  router.push(
+                                    `/dashboard/students/${student.docId}`,
+                                  )
                                 }
                                 className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition cursor-pointer"
                                 title="View profile"
@@ -360,7 +529,9 @@ export default function StudentsPage() {
                               <button
                                 onClick={() =>
                                   setOpenMenuId(
-                                    openMenuId === student.docId ? null : student.docId,
+                                    openMenuId === student.docId
+                                      ? null
+                                      : student.docId,
                                   )
                                 }
                                 className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition cursor-pointer"
@@ -378,7 +549,9 @@ export default function StudentsPage() {
                                 <div className="absolute right-4 top-10 z-20 bg-white border border-gray-100 rounded-xl shadow-lg py-1.5 w-40 text-left">
                                   <button
                                     onClick={() =>
-                                      router.push(`/dashboard/students/${student.docId}/edit`)
+                                      router.push(
+                                        `/dashboard/students/${student.docId}/edit`,
+                                      )
                                     }
                                     className="w-full px-3.5 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50 text-left cursor-pointer"
                                   >
@@ -392,7 +565,9 @@ export default function StudentsPage() {
                                         : "text-emerald-600"
                                     }`}
                                   >
-                                    {student.status === "Active" ? "Deactivate" : "Activate"}
+                                    {student.status === "Active"
+                                      ? "Deactivate"
+                                      : "Activate"}
                                   </button>
                                   <button
                                     onClick={() => handleDeleteStudent(student)}
@@ -412,7 +587,8 @@ export default function StudentsPage() {
 
                 <div className="px-6 py-4 bg-white border-t border-gray-100 flex flex-col sm:flex-row items-center justify-between gap-4">
                   <span className="text-xs text-gray-500">
-                    Showing {filteredStudents.length} of {students.length} students
+                    Showing {filteredStudents.length} of {scopedStudents.length}{" "}
+                    students
                   </span>
 
                   <div className="flex items-center gap-3">
@@ -450,7 +626,9 @@ function StatCard({ label, value, icon: Icon, bg, fg }) {
     <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm flex flex-col justify-between">
       <div className="flex items-center justify-between">
         <span className="text-xs font-medium text-gray-500">{label}</span>
-        <div className={`w-8 h-8 rounded-lg ${bg} flex items-center justify-center ${fg}`}>
+        <div
+          className={`w-8 h-8 rounded-lg ${bg} flex items-center justify-center ${fg}`}
+        >
           <Icon className="w-4 h-4" />
         </div>
       </div>

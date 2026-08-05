@@ -5,8 +5,14 @@ import Link from "next/link";
 import DashboardTopbar from "@/dashboardcomponents/Dashboardtopbar";
 import Sidebar from "@/dashboardcomponents/Dashboardsidebar";
 import { useAuth } from "@/context/AuthContext";
-import { db, getClassTeacher } from "@/lib/firebase";
-import { doc, getDoc, updateDoc } from "firebase/firestore";
+import { db, getClassTeacher, setClassTeacher } from "@/lib/firebase";
+import {
+  doc,
+  getDoc,
+  updateDoc,
+  collection,
+  getDocs,
+} from "firebase/firestore";
 import { ArrowLeft, Loader2, Check } from "lucide-react";
 
 const CLASS_OPTIONS = [
@@ -23,18 +29,20 @@ const CLASS_OPTIONS = [
   "8",
   "9",
   "10",
-  "11-Science",
-  "11-Commerce",
-  "11-Arts",
-  "12-Science",
-  "12-Commerce",
-  "12-Arts",
 ];
-const SECTION_OPTIONS = ["A", "B", "C", "D"];
 const GENDER_OPTIONS = ["Male", "Female", "Other"];
 const BLOOD_GROUP_OPTIONS = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
 const RELATION_OPTIONS = ["Father", "Mother", "Guardian", "Other"];
 const FEE_STATUS_OPTIONS = ["Paid", "Pending", "Partial"];
+
+// ---- Sanitizers: numbers where numbers belong, letters where names belong ----
+function sanitizeAlpha(value) {
+  return value.replace(/[^a-zA-Z\s'.-]/g, "");
+}
+function sanitizeDigits(value, maxLen) {
+  const digits = value.replace(/\D/g, "");
+  return maxLen ? digits.slice(0, maxLen) : digits;
+}
 
 export default function EditStudentPage() {
   const { id } = useParams();
@@ -48,14 +56,31 @@ export default function EditStudentPage() {
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
   const [classTeacherName, setClassTeacherName] = useState(null);
+  const [teacherOptions, setTeacherOptions] = useState([]);
 
   useEffect(() => {
-    if (form?.className && form?.section) {
-      getClassTeacher(form.className, form.section).then((data) => {
+    async function loadTeachers() {
+      try {
+        const snap = await getDocs(collection(db, "teachers"));
+        setTeacherOptions(
+          snap.docs.map((d) => ({ id: d.id, name: d.data().fullName })),
+        );
+      } catch (err) {
+        console.error("Failed to load teachers:", err);
+      }
+    }
+    loadTeachers();
+  }, []);
+
+  useEffect(() => {
+    if (form?.className) {
+      getClassTeacher(form.className).then((data) => {
         setClassTeacherName(data?.teacherName || null);
       });
+    } else {
+      setClassTeacherName(null);
     }
-  }, [form?.className, form?.section]);
+  }, [form?.className]);
 
   useEffect(() => {
     async function fetchStudent() {
@@ -81,8 +106,29 @@ export default function EditStudentPage() {
     setForm((f) => ({ ...f, [name]: value }));
   }
 
+  async function handleAssignClassTeacher(teacherId) {
+    const teacher = teacherOptions.find((t) => t.id === teacherId);
+    if (!teacher || !form?.className) return;
+    await setClassTeacher(form.className, teacher.id, teacher.name);
+    setClassTeacherName(teacher.name);
+  }
+
   async function handleSave(e) {
     e.preventDefault();
+
+    if (form.guardianPhone && !/^\d{10}$/.test(form.guardianPhone)) {
+      setError("Guardian Phone must be exactly 10 digits.");
+      return;
+    }
+    if (form.motherPhone && !/^\d{10}$/.test(form.motherPhone)) {
+      setError("Mother's Phone must be exactly 10 digits.");
+      return;
+    }
+    if (form.emergencyPhone && !/^\d{10}$/.test(form.emergencyPhone)) {
+      setError("Emergency Contact Number must be exactly 10 digits.");
+      return;
+    }
+
     setSaving(true);
     setError("");
     try {
@@ -163,20 +209,13 @@ export default function EditStudentPage() {
                 <h2 className="text-[13.5px] font-bold text-gray-900 mb-3">
                   Basic Information
                 </h2>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-2">
                   <Select
                     label="Class"
                     name="className"
                     value={form.className}
                     onChange={handleChange}
                     options={CLASS_OPTIONS}
-                  />
-                  <Select
-                    label="Section"
-                    name="section"
-                    value={form.section}
-                    onChange={handleChange}
-                    options={SECTION_OPTIONS}
                   />
                   <Select
                     label="Gender"
@@ -187,38 +226,46 @@ export default function EditStudentPage() {
                   />
                 </div>
 
-                {form.className && form.section && (
-                  <p className="text-[11.5px] text-gray-500 mb-4">
-                    Class Teacher:{" "}
-                    <span className="font-semibold text-gray-700">
-                      {classTeacherName || "Not assigned yet"}
-                    </span>
-                  </p>
+                {form.className && (
+                  <div className="mb-4">
+                    {classTeacherName ? (
+                      <p className="text-[11.5px] text-gray-500">
+                        Class Incharge:{" "}
+                        <span className="font-semibold text-gray-700">
+                          {classTeacherName}
+                        </span>
+                      </p>
+                    ) : isAdmin ? (
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[11.5px] font-semibold text-rose-600">
+                          No class incharge assigned yet — assign one to
+                          continue *
+                        </span>
+                        <select
+                          required
+                          onChange={(e) =>
+                            handleAssignClassTeacher(e.target.value)
+                          }
+                          defaultValue=""
+                          className="text-[13px] font-semibold px-3 py-1.5 rounded-lg border border-orange-300 bg-white text-gray-900 outline-none cursor-pointer focus:border-orange-500 focus:ring-4 focus:ring-orange-500/10"
+                        >
+                          <option value="" disabled>
+                            Select a teacher...
+                          </option>
+                          {teacherOptions.map((t) => (
+                            <option key={t.id} value={t.id}>
+                              {t.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : (
+                      <p className="text-[11.5px] text-gray-400 italic">
+                        No class incharge assigned yet.
+                      </p>
+                    )}
+                  </div>
                 )}
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
-                  <Select
-                    label="Class"
-                    name="className"
-                    value={form.className}
-                    onChange={handleChange}
-                    options={CLASS_OPTIONS}
-                  />
-                  <Select
-                    label="Section"
-                    name="section"
-                    value={form.section}
-                    onChange={handleChange}
-                    options={SECTION_OPTIONS}
-                  />
-                  <Select
-                    label="Gender"
-                    name="gender"
-                    value={form.gender}
-                    onChange={handleChange}
-                    options={GENDER_OPTIONS}
-                  />
-                </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
                   <Field
@@ -263,18 +310,22 @@ export default function EditStudentPage() {
                     name="city"
                     value={form.city}
                     onChange={handleChange}
+                    filter="alpha"
                   />
                   <Field
                     label="State"
                     name="state"
                     value={form.state}
                     onChange={handleChange}
+                    filter="alpha"
                   />
                   <Field
                     label="Pincode"
                     name="pincode"
                     value={form.pincode}
                     onChange={handleChange}
+                    filter="digits"
+                    maxLength={6}
                   />
                 </div>
 
@@ -287,6 +338,7 @@ export default function EditStudentPage() {
                     name="guardianName"
                     value={form.guardianName}
                     onChange={handleChange}
+                    filter="alpha"
                     required
                   />
                   <Select
@@ -296,7 +348,7 @@ export default function EditStudentPage() {
                     onChange={handleChange}
                     options={RELATION_OPTIONS}
                   />
-                  <Field
+                  <PhoneField
                     label="Guardian Phone"
                     name="guardianPhone"
                     value={form.guardianPhone}
@@ -320,8 +372,9 @@ export default function EditStudentPage() {
                     name="motherName"
                     value={form.motherName}
                     onChange={handleChange}
+                    filter="alpha"
                   />
-                  <Field
+                  <PhoneField
                     label="Mother's Phone"
                     name="motherPhone"
                     value={form.motherPhone}
@@ -395,8 +448,9 @@ export default function EditStudentPage() {
                     name="emergencyName"
                     value={form.emergencyName}
                     onChange={handleChange}
+                    filter="alpha"
                   />
-                  <Field
+                  <PhoneField
                     label="Emergency Contact Number"
                     name="emergencyPhone"
                     value={form.emergencyPhone}
@@ -436,7 +490,23 @@ export default function EditStudentPage() {
   );
 }
 
-function Field({ label, name, value, onChange, type = "text", required }) {
+function Field({
+  label,
+  name,
+  value,
+  onChange,
+  type = "text",
+  required,
+  filter,
+  maxLength,
+}) {
+  function handleInputChange(e) {
+    let val = e.target.value;
+    if (filter === "alpha") val = sanitizeAlpha(val);
+    if (filter === "digits") val = sanitizeDigits(val, maxLength);
+    onChange({ target: { name, value: val } });
+  }
+
   return (
     <div>
       <label className="block text-[12px] font-semibold text-gray-900 mb-1.5">
@@ -446,8 +516,10 @@ function Field({ label, name, value, onChange, type = "text", required }) {
         type={type}
         name={name}
         value={value || ""}
-        onChange={onChange}
+        onChange={handleInputChange}
         required={required}
+        maxLength={maxLength}
+        inputMode={filter === "digits" ? "numeric" : undefined}
         className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 text-[13px] text-gray-900 bg-gray-50 outline-none focus:border-orange-500 focus:ring-4 focus:ring-orange-500/10"
       />
     </div>
@@ -473,6 +545,42 @@ function Select({ label, name, value, onChange, options }) {
           </option>
         ))}
       </select>
+    </div>
+  );
+}
+
+function PhoneField({ label, name, value, onChange, required }) {
+  function handlePhoneChange(e) {
+    const digitsOnly = sanitizeDigits(e.target.value, 10);
+    onChange({ target: { name, value: digitsOnly } });
+  }
+
+  const val = value || "";
+  const showWarning = val.length > 0 && val.length < 10;
+
+  return (
+    <div>
+      <label className="block text-[12px] font-semibold text-gray-900 mb-1.5">
+        {label} {required && <span className="text-red-500">*</span>}
+      </label>
+      <input
+        type="tel"
+        inputMode="numeric"
+        name={name}
+        value={val}
+        onChange={handlePhoneChange}
+        required={required}
+        maxLength={10}
+        pattern="[0-9]{10}"
+        title="Enter exactly 10 digits"
+        placeholder="10-digit number"
+        className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 text-[13px] text-gray-900 bg-gray-50 outline-none focus:border-orange-500 focus:ring-4 focus:ring-orange-500/10"
+      />
+      {showWarning && (
+        <p className="text-[11px] text-amber-600 mt-1">
+          {10 - val.length} more digit{10 - val.length !== 1 ? "s" : ""} needed
+        </p>
+      )}
     </div>
   );
 }

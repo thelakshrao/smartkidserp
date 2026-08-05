@@ -58,14 +58,45 @@ export default function TeacherDashboard({ profile }) {
 
   const mappings = teacherDoc?.classSubjectMappings || [];
 
+  const [studentsInClasses, setStudentsInClasses] = useState([]);
+
+  useEffect(() => {
+    const classNames = mappings.map((m) => m.className).filter(Boolean);
+
+    if (classNames.length === 0) {
+      setStudentsInClasses([]);
+      return;
+    }
+
+    const q = query(
+      collection(db, "students"),
+      where("className", "in", classNames.slice(0, 10)),
+    );
+    const unsub = onSnapshot(
+      q,
+      (snap) => setStudentsInClasses(snap.docs.map((d) => d.data())),
+      (err) => {
+        console.error("Failed to load students for teacher's classes:", err);
+        setStudentsInClasses([]);
+      },
+    );
+    return () => unsub();
+  }, [teacherDoc]);
+
   const stats = useMemo(() => {
     const totalClasses = mappings.length;
-    const totalStudents = mappings.reduce(
-      (sum, m) => sum + (m.studentsCount || 0),
-      0,
-    );
+    const totalStudents = studentsInClasses.length;
     return { totalClasses, totalStudents };
-  }, [mappings]);
+  }, [mappings, studentsInClasses]);
+
+  // Per-class breakdown for the "My Classes" list below.
+  const studentCountByClass = useMemo(() => {
+    const counts = {};
+    studentsInClasses.forEach((s) => {
+      if (s.className) counts[s.className] = (counts[s.className] || 0) + 1;
+    });
+    return counts;
+  }, [studentsInClasses]);
 
   if (loading) {
     return (
@@ -181,7 +212,9 @@ export default function TeacherDashboard({ profile }) {
                         </div>
                       </div>
                       <span className="text-[11.5px] text-gray-400">
-                        {m.studentsCount ? `${m.studentsCount} Students` : "-"}
+                        {studentCountByClass[m.className]
+                          ? `${studentCountByClass[m.className]} Students`
+                          : "0 Students"}
                       </span>
                     </div>
                   ))}

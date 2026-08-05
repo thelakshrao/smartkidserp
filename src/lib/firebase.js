@@ -129,30 +129,22 @@ export async function createAdminLogin({
   return authUid;
 }
 
-export function classKeyFor(className, section) {
-  return `${className}__${section || "none"}`;
+export function classKeyFor(className) {
+  return className;
 }
 
-export async function setClassTeacher(
-  className,
-  section,
-  teacherId,
-  teacherName,
-) {
-  if (!className || !section) return;
-  await setDoc(doc(db, "classTeachers", classKeyFor(className, section)), {
+export async function setClassTeacher(className, teacherId, teacherName) {
+  if (!className) return;
+  await setDoc(doc(db, "classTeachers", classKeyFor(className)), {
     className,
-    section,
     teacherId,
     teacherName,
     updatedAt: serverTimestamp(),
   });
 }
 
-export async function getClassTeacher(className, section) {
-  if (!className || !section) return null;
-  const snap = await getDoc(
-    doc(db, "classTeachers", classKeyFor(className, section)),
-  );
+export async function getClassTeacher(className) {
+  if (!className) return null;
+  const snap = await getDoc(doc(db, "classTeachers", classKeyFor(className)));
   return snap.exists() ? snap.data() : null;
 }

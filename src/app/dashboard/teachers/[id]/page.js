@@ -6,6 +6,7 @@ import DashboardTopbar from "@/dashboardcomponents/Dashboardtopbar";
 import Sidebar from "@/dashboardcomponents/Dashboardsidebar";
 import { useAuth } from "@/context/AuthContext";
 import { db } from "@/lib/firebase";
+import { logActivity } from "@/lib/activityLog";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import {
   ArrowLeft,
@@ -105,6 +106,13 @@ export default function TeacherProfilePage() {
       await updateDoc(doc(db, "teachers", teacher.docId), {
         status: nextStatus,
       });
+
+      await logActivity("teacher_status_changed", {
+        actorName: profile?.name,
+        targetName: teacher.fullName,
+        meta: { newStatus: nextStatus },
+      });
+
       setTeacher((t) => ({ ...t, status: nextStatus }));
     } catch (err) {
       console.error(err);

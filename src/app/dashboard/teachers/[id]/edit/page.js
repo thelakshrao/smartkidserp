@@ -44,12 +44,6 @@ const CLASS_OPTIONS = [
   "8",
   "9",
   "10",
-  "11-Science",
-  "11-Commerce",
-  "11-Arts",
-  "12-Science",
-  "12-Commerce",
-  "12-Arts",
 ];
 const GENDER_OPTIONS = ["Male", "Female", "Other"];
 const MARITAL_OPTIONS = ["Single", "Married", "Divorced", "Widowed"];
@@ -67,6 +61,14 @@ const DEPARTMENT_OPTIONS = [
   "Senior Secondary",
 ];
 const BLOOD_GROUP_OPTIONS = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
+
+function sanitizeAlpha(value) {
+  return value.replace(/[^a-zA-Z\s'.-]/g, "");
+}
+function sanitizeDigits(value, maxLen) {
+  const digits = value.replace(/\D/g, "");
+  return maxLen ? digits.slice(0, maxLen) : digits;
+}
 
 export default function EditTeacherPage() {
   const { id } = useParams();
@@ -153,6 +155,16 @@ export default function EditTeacherPage() {
 
   async function handleSave(e) {
     e.preventDefault();
+
+    if (!/^\d{10}$/.test(form.phone || "")) {
+      setError("Phone must be exactly 10 digits.");
+      return;
+    }
+    if (form.emergencyPhone && !/^\d{10}$/.test(form.emergencyPhone)) {
+      setError("Emergency Contact Number must be exactly 10 digits.");
+      return;
+    }
+
     setSaving(true);
     setError("");
     try {
@@ -244,6 +256,7 @@ export default function EditTeacherPage() {
                     name="fullName"
                     value={form.fullName}
                     onChange={handleChange}
+                    filter="alpha"
                     required
                   />
                   <Field
@@ -254,7 +267,7 @@ export default function EditTeacherPage() {
                     onChange={handleChange}
                     required
                   />
-                  <Field
+                  <PhoneField
                     label="Phone"
                     name="phone"
                     value={form.phone}
@@ -456,18 +469,22 @@ export default function EditTeacherPage() {
                     name="city"
                     value={form.city}
                     onChange={handleChange}
+                    filter="alpha"
                   />
                   <Field
                     label="State"
                     name="state"
                     value={form.state}
                     onChange={handleChange}
+                    filter="alpha"
                   />
                   <Field
                     label="Pincode"
                     name="pincode"
                     value={form.pincode}
                     onChange={handleChange}
+                    filter="digits"
+                    maxLength={6}
                   />
                 </div>
 
@@ -477,8 +494,9 @@ export default function EditTeacherPage() {
                     name="emergencyName"
                     value={form.emergencyName}
                     onChange={handleChange}
+                    filter="alpha"
                   />
-                  <Field
+                  <PhoneField
                     label="Emergency Contact Number"
                     name="emergencyPhone"
                     value={form.emergencyPhone}
@@ -533,7 +551,16 @@ function Field({
   type = "text",
   required,
   placeholder,
+  filter,
+  maxLength,
 }) {
+  function handleInputChange(e) {
+    let val = e.target.value;
+    if (filter === "alpha") val = sanitizeAlpha(val);
+    if (filter === "digits") val = sanitizeDigits(val, maxLength);
+    onChange({ target: { name, value: val } });
+  }
+
   return (
     <div>
       <label className="block text-[12px] font-semibold text-gray-900 mb-1.5">
@@ -543,9 +570,11 @@ function Field({
         type={type}
         name={name}
         value={value || ""}
-        onChange={onChange}
+        onChange={handleInputChange}
         required={required}
         placeholder={placeholder}
+        maxLength={maxLength}
+        inputMode={filter === "digits" ? "numeric" : undefined}
         className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 text-[13px] text-gray-900 bg-gray-50 placeholder:text-gray-400 outline-none focus:border-orange-500 focus:ring-4 focus:ring-orange-500/10"
       />
     </div>
@@ -571,6 +600,42 @@ function Select({ label, name, value, onChange, options }) {
           </option>
         ))}
       </select>
+    </div>
+  );
+}
+
+function PhoneField({ label, name, value, onChange, required }) {
+  function handlePhoneChange(e) {
+    const digitsOnly = sanitizeDigits(e.target.value, 10);
+    onChange({ target: { name, value: digitsOnly } });
+  }
+
+  const val = value || "";
+  const showWarning = val.length > 0 && val.length < 10;
+
+  return (
+    <div>
+      <label className="block text-[12px] font-semibold text-gray-900 mb-1.5">
+        {label} {required && <span className="text-red-500">*</span>}
+      </label>
+      <input
+        type="tel"
+        inputMode="numeric"
+        name={name}
+        value={val}
+        onChange={handlePhoneChange}
+        required={required}
+        maxLength={10}
+        pattern="[0-9]{10}"
+        title="Enter exactly 10 digits"
+        placeholder="10-digit number"
+        className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 text-[13px] text-gray-900 bg-gray-50 outline-none focus:border-orange-500 focus:ring-4 focus:ring-orange-500/10"
+      />
+      {showWarning && (
+        <p className="text-[11px] text-amber-600 mt-1">
+          {10 - val.length} more digit{10 - val.length !== 1 ? "s" : ""} needed
+        </p>
+      )}
     </div>
   );
 }

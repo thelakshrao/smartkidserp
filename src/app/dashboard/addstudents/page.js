@@ -27,6 +27,7 @@ import {
   serverTimestamp,
   getDocs,
 } from "firebase/firestore";
+import { logActivity } from "@/lib/activityLog";
 
 const STEPS = [
   { id: 1, label: "Basic Information" },
@@ -48,18 +49,19 @@ const CLASS_OPTIONS = [
   "8",
   "9",
   "10",
-  "11-Science",
-  "11-Commerce",
-  "11-Arts",
-  "12-Science",
-  "12-Commerce",
-  "12-Arts",
 ];
-const SECTION_OPTIONS = ["A", "B", "C", "D"];
 const GENDER_OPTIONS = ["Male", "Female", "Other"];
 const BLOOD_GROUP_OPTIONS = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
 const RELATION_OPTIONS = ["Father", "Mother", "Guardian", "Other"];
 const FEE_STATUS_OPTIONS = ["Paid", "Pending", "Partial"];
+
+function sanitizeAlpha(value) {
+  return value.replace(/[^a-zA-Z\s'.-]/g, "");
+}
+function sanitizeDigits(value, maxLen) {
+  const digits = value.replace(/\D/g, "");
+  return maxLen ? digits.slice(0, maxLen) : digits;
+}
 
 function generateDefaultPassword() {
   const year = new Date().getFullYear();
@@ -76,7 +78,6 @@ const initialForm = {
   phone: "",
   admissionNumber: "",
   className: "",
-  section: "",
   gender: "",
   dob: "",
   bloodGroup: "",
@@ -134,30 +135,29 @@ export default function AddStudentPage() {
   }, []);
 
   useEffect(() => {
-    if (form.className && form.section) {
-      getClassTeacher(form.className, form.section).then((data) => {
+    if (form.className) {
+      getClassTeacher(form.className).then((data) => {
         setClassTeacherName(data?.teacherName || null);
       });
     } else {
       setClassTeacherName(null);
     }
-  }, [form.className, form.section]);
+  }, [form.className]);
 
   async function handleAssignClassTeacher(teacherId) {
     const teacher = teacherOptions.find((t) => t.id === teacherId);
-    if (!teacher || !form.className || !form.section) return;
-    await setClassTeacher(
-      form.className,
-      form.section,
-      teacher.id,
-      teacher.name,
-    );
+    if (!teacher || !form.className) return;
+    await setClassTeacher(form.className, teacher.id, teacher.name);
     setClassTeacherName(teacher.name);
   }
 
   function handleChange(e) {
     const { name, value } = e.target;
     setForm((f) => ({ ...f, [name]: value }));
+  }
+
+  function isPhoneValid(val) {
+    return !val || /^\d{10}$/.test(val);
   }
 
   function isStepValid(currentStep) {
@@ -168,13 +168,17 @@ export default function AddStudentPage() {
         form.className &&
         form.gender &&
         form.dob &&
-        form.email.trim()
+        form.email.trim() &&
+        isPhoneValid(form.phone) &&
+        !!classTeacherName
       );
     }
     if (currentStep === 2) {
       return (
         form.guardianName.trim() &&
-        form.guardianPhone.trim() &&
+        /^\d{10}$/.test(form.guardianPhone) &&
+        isPhoneValid(form.motherPhone) &&
+        isPhoneValid(form.emergencyPhone) &&
         form.feeTotal !== "" &&
         form.feePaid !== "" &&
         form.feeStatus
@@ -185,7 +189,9 @@ export default function AddStudentPage() {
 
   function goNext() {
     if (!isStepValid(step)) {
-      setStepError("Please fill in all required fields before continuing.");
+      setStepError(
+        "Please fill in all required fields correctly before continuing (phone numbers must be exactly 10 digits).",
+      );
       return;
     }
     setStepError("");
@@ -237,6 +243,12 @@ export default function AddStudentPage() {
         status: "active",
         createdBy: profile?.uid || profile?.name || null,
         createdAt: serverTimestamp(),
+      });
+
+      await logActivity("student_added", {
+        actorName: profile?.name,
+        targetName: form.fullName,
+        meta: { className: form.className, section: form.section },
       });
 
       setSuccess(true);
@@ -454,6 +466,7 @@ function BasicInformationStep({
           value={form.fullName}
           onChange={onChange}
           placeholder="Enter full name"
+          filter="alpha"
           required
         />
         <TextField
@@ -465,10 +478,15 @@ function BasicInformationStep({
           helper="Example: STU2026001"
           required
         />
-        <PhoneField value={form.phone} onChange={onChange} />
+        <PhoneField
+          label="Phone Number"
+          name="phone"
+          value={form.phone}
+          onChange={onChange}
+        />
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-2">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-2">
         <SelectField
           label="Class"
           name="className"
@@ -477,14 +495,6 @@ function BasicInformationStep({
           options={CLASS_OPTIONS}
           placeholder="Select class"
           required
-        />
-        <SelectField
-          label="Section"
-          name="section"
-          value={form.section}
-          onChange={onChange}
-          options={SECTION_OPTIONS}
-          placeholder="Select section"
         />
         <SelectField
           label="Gender"
@@ -497,27 +507,28 @@ function BasicInformationStep({
         />
       </div>
 
-      {form.className && form.section && (
+      {form.className && (
         <div className="mb-4">
           {classTeacherName ? (
             <p className="text-[11.5px] text-gray-500">
-              Class Teacher:{" "}
+              Class Incharge:{" "}
               <span className="font-semibold text-gray-700">
                 {classTeacherName}
               </span>
             </p>
           ) : isAdmin ? (
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-[11.5px] text-gray-500">
-                No class teacher assigned yet —
+              <span className="text-[11.5px] font-semibold text-rose-600">
+                No class incharge assigned yet — assign one to continue *
               </span>
               <select
+                required
                 onChange={(e) => onAssignClassTeacher(e.target.value)}
                 defaultValue=""
-                className="text-[12px] px-2 py-1 rounded-lg border border-gray-200 bg-gray-50 outline-none cursor-pointer"
+                className="text-[13px] font-semibold px-3 py-1.5 rounded-lg border border-orange-300 bg-white text-gray-900 outline-none cursor-pointer focus:border-orange-500 focus:ring-4 focus:ring-orange-500/10"
               >
                 <option value="" disabled>
-                  Assign one...
+                  Select a teacher...
                 </option>
                 {teacherOptions.map((t) => (
                   <option key={t.id} value={t.id}>
@@ -528,7 +539,7 @@ function BasicInformationStep({
             </div>
           ) : (
             <p className="text-[11.5px] text-gray-400 italic">
-              No class teacher assigned yet.
+              No class incharge assigned yet.
             </p>
           )}
         </div>
@@ -584,6 +595,7 @@ function BasicInformationStep({
           value={form.city}
           onChange={onChange}
           placeholder="Enter city"
+          filter="alpha"
         />
         <TextField
           label="State"
@@ -591,13 +603,16 @@ function BasicInformationStep({
           value={form.state}
           onChange={onChange}
           placeholder="Enter state"
+          filter="alpha"
         />
         <TextField
           label="Pincode"
           name="pincode"
           value={form.pincode}
           onChange={onChange}
-          placeholder="Enter pincode"
+          placeholder="6-digit pincode"
+          filter="digits"
+          maxLength={6}
         />
       </div>
     </div>
@@ -621,6 +636,7 @@ function GuardianFeeStep({ form, onChange }) {
           value={form.guardianName}
           onChange={onChange}
           placeholder="Enter guardian name"
+          filter="alpha"
           required
         />
         <SelectField
@@ -631,13 +647,11 @@ function GuardianFeeStep({ form, onChange }) {
           options={RELATION_OPTIONS}
           placeholder="Select relation"
         />
-        <TextField
+        <PhoneField
           label="Guardian Phone"
           name="guardianPhone"
-          type="tel"
           value={form.guardianPhone}
           onChange={onChange}
-          placeholder="Enter guardian phone"
           required
         />
       </div>
@@ -660,14 +674,13 @@ function GuardianFeeStep({ form, onChange }) {
           value={form.motherName}
           onChange={onChange}
           placeholder="Enter mother's name"
+          filter="alpha"
         />
-        <TextField
+        <PhoneField
           label="Mother's Phone (optional)"
           name="motherPhone"
-          type="tel"
           value={form.motherPhone}
           onChange={onChange}
-          placeholder="Enter mother's phone"
         />
         <TextField
           label="Mother's Email (optional)"
@@ -736,14 +749,13 @@ function GuardianFeeStep({ form, onChange }) {
           value={form.emergencyName}
           onChange={onChange}
           placeholder="Contact name"
+          filter="alpha"
         />
-        <TextField
+        <PhoneField
           label="Emergency Contact Number"
           name="emergencyPhone"
-          type="tel"
           value={form.emergencyPhone}
           onChange={onChange}
-          placeholder="Contact number"
         />
       </div>
     </div>
@@ -759,7 +771,16 @@ function TextField({
   placeholder,
   required,
   helper,
+  filter,
+  maxLength,
 }) {
+  function handleInputChange(e) {
+    let val = e.target.value;
+    if (filter === "alpha") val = sanitizeAlpha(val);
+    if (filter === "digits") val = sanitizeDigits(val, maxLength);
+    onChange({ target: { name, value: val } });
+  }
+
   return (
     <div>
       <label className="block text-[12px] font-semibold text-gray-900 mb-1.5">
@@ -769,9 +790,11 @@ function TextField({
         type={type}
         name={name}
         value={value}
-        onChange={onChange}
+        onChange={handleInputChange}
         placeholder={placeholder}
         required={required}
+        maxLength={maxLength}
+        inputMode={filter === "digits" ? "numeric" : undefined}
         className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 text-[13px] text-gray-900 bg-gray-50 placeholder:text-gray-400 outline-none focus:border-orange-500 focus:ring-4 focus:ring-orange-500/10"
       />
       {helper && <p className="text-[11px] text-gray-400 mt-1">{helper}</p>}
@@ -811,11 +834,24 @@ function SelectField({
   );
 }
 
-function PhoneField({ value, onChange }) {
+function PhoneField({
+  label = "Phone Number",
+  name = "phone",
+  value,
+  onChange,
+  required,
+}) {
+  function handlePhoneChange(e) {
+    const digitsOnly = sanitizeDigits(e.target.value, 10);
+    onChange({ target: { name, value: digitsOnly } });
+  }
+
+  const showWarning = value && value.length > 0 && value.length < 10;
+
   return (
     <div>
       <label className="block text-[12px] font-semibold text-gray-900 mb-1.5">
-        Phone Number
+        {label} {required && <span className="text-red-500">*</span>}
       </label>
       <div className="flex gap-2">
         <select
@@ -826,13 +862,24 @@ function PhoneField({ value, onChange }) {
         </select>
         <input
           type="tel"
-          name="phone"
-          value={value}
-          onChange={onChange}
-          placeholder="Enter phone number"
+          inputMode="numeric"
+          name={name}
+          value={value || ""}
+          onChange={handlePhoneChange}
+          required={required}
+          placeholder="10-digit number"
+          maxLength={10}
+          pattern="[0-9]{10}"
+          title="Enter exactly 10 digits"
           className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 text-[13px] text-gray-900 bg-gray-50 placeholder:text-gray-400 outline-none focus:border-orange-500 focus:ring-4 focus:ring-orange-500/10"
         />
       </div>
+      {showWarning && (
+        <p className="text-[11px] text-amber-600 mt-1">
+          {10 - value.length} more digit{10 - value.length !== 1 ? "s" : ""}{" "}
+          needed
+        </p>
+      )}
     </div>
   );
 }
@@ -895,7 +942,6 @@ function ReviewStep({
     ["Full Name", form.fullName],
     ["Admission Number", form.admissionNumber],
     ["Class", form.className],
-    ["Section", form.section],
     ["Gender", form.gender],
     ["Date of Birth", form.dob],
     ["Blood Group", form.bloodGroup],
@@ -1024,7 +1070,6 @@ function StudentPreview({ form }) {
     ["Full Name", form.fullName],
     ["Admission Number", form.admissionNumber],
     ["Class", form.className],
-    ["Section", form.section],
     ["Gender", form.gender],
     ["Date of Birth", form.dob],
     ["Guardian", form.guardianName],
@@ -1050,9 +1095,7 @@ function StudentPreview({ form }) {
             {form.fullName || "Student Name"}
           </div>
           <div className="text-[12px] text-gray-500">
-            {form.className
-              ? `Class ${form.className}${form.section ? ` - ${form.section}` : ""}`
-              : "Class"}
+            {form.className ? `Class ${form.className}` : "Class"}
           </div>
         </div>
         <div className="flex flex-col gap-2.5 border-t border-gray-100 pt-4">

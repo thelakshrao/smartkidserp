@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   AreaChart,
   Area,
@@ -47,6 +47,12 @@ import {
   orderBy,
   serverTimestamp,
 } from "firebase/firestore";
+import {
+  logActivity,
+  subscribeToRecentActivity,
+  describeActivity,
+  formatRelativeTime,
+} from "@/lib/activityLog";
 
 const ADMIN_ROLE_OPTIONS = [
   { value: "developer", label: "Developer" },
@@ -56,40 +62,17 @@ const ADMIN_ROLE_OPTIONS = [
   { value: "clerk", label: "Clerk" },
 ];
 
-const STATS = [
-  {
-    label: "Total Students",
-    value: "1,248",
-    change: "12.5% from last month",
-    icon: Users,
-    bg: "bg-[#efe7fb]",
-    fg: "text-[#8c5cf0]",
-  },
-  {
-    label: "Total Teachers",
-    value: "86",
-    change: "8.3% from last month",
-    icon: GraduationCap,
-    bg: "bg-[#e3f0fd]",
-    fg: "text-[#2f8fe0]",
-  },
-  {
-    label: "Attendance Today",
-    value: "92.4%",
-    change: "5.6% from yesterday",
-    icon: CheckCircle2,
-    bg: "bg-[#e2f7ea]",
-    fg: "text-[#2fa860]",
-  },
-  {
-    label: "Fees Collection",
-    value: "₹12,45,300",
-    change: "18.7% from last month",
-    icon: FileText,
-    bg: "bg-[#fdecd8]",
-    fg: "text-[#f7941d]",
-  },
-];
+// Attendance Today has no real data source yet (waits on Phase B), so it
+// stays as an honest placeholder rather than a fabricated live number.
+const ATTENDANCE_TODAY_PLACEHOLDER = {
+  label: "Attendance Today",
+  value: "—",
+  change: "Not tracked yet",
+  icon: CheckCircle2,
+  bg: "bg-[#e2f7ea]",
+  fg: "text-[#2fa860]",
+};
+
 const ATTENDANCE_DATA = [
   { day: "Mon", pct: 78 },
   { day: "Tue", pct: 85 },
@@ -103,29 +86,6 @@ const EXAM_DATA = [
   { name: "Ongoing", value: 80, color: "#2fa860" },
   { name: "Completed", value: 90, color: "#8c5cf0" },
   { name: "Pending Results", value: 30, color: "#f7941d" },
-];
-const RECENT_ACTIVITIES = [
-  {
-    text: "New student Aarav Sharma has been added in Class 7B",
-    when: "2 hours ago",
-    icon: UserPlus,
-    bg: "bg-[#efe7fb]",
-    fg: "text-[#8c5cf0]",
-  },
-  {
-    text: "Fee of ₹15,000 received from Riya Singh (Class 8A)",
-    when: "4 hours ago",
-    icon: IndianRupee,
-    bg: "bg-[#e2f7ea]",
-    fg: "text-[#2fa860]",
-  },
-  {
-    text: "Attendance marked for Class 6A",
-    when: "5 hours ago",
-    icon: ClipboardCheck,
-    bg: "bg-[#fdecd8]",
-    fg: "text-[#f7941d]",
-  },
 ];
 const UPCOMING_EVENTS = [
   {
@@ -189,11 +149,97 @@ function generateDefaultPassword() {
   return `Skcs${sym1}${year}${sym2}${rand}`;
 }
 
+function formatINR(n) {
+  return `₹${(n || 0).toLocaleString("en-IN")}`;
+}
+
 export default function AdminDashboard({ profile }) {
   const [showAddAdmin, setShowAddAdmin] = useState(false);
   const [showAdminsList, setShowAdminsList] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const router = useRouter();
+
+  // A1 — live Recent Activities feed.
+  const [activities, setActivities] = useState([]);
+  useEffect(() => {
+    const unsub = subscribeToRecentActivity(setActivities, 6);
+    return () => unsub();
+  }, []);
+
+  // A2 — live student count + fee aggregation (also feeds A3).
+  const [students, setStudents] = useState([]);
+  const [studentsLoaded, setStudentsLoaded] = useState(false);
+  useEffect(() => {
+    const unsub = onSnapshot(
+      collection(db, "students"),
+      (snap) => {
+        setStudents(snap.docs.map((d) => d.data()));
+        setStudentsLoaded(true);
+      },
+      (err) => {
+        console.error("Failed to load students for dashboard stats:", err);
+        setStudentsLoaded(true);
+      },
+    );
+    return () => unsub();
+  }, []);
+
+  // A2 — live teacher count.
+  const [teacherCount, setTeacherCount] = useState(null);
+  useEffect(() => {
+    const unsub = onSnapshot(
+      collection(db, "teachers"),
+      (snap) => setTeacherCount(snap.size),
+      (err) => {
+        console.error("Failed to load teachers for dashboard stats:", err);
+        setTeacherCount(0);
+      },
+    );
+    return () => unsub();
+  }, []);
+
+  // A3 — aggregate fee numbers from the live students list.
+  const feeSummary = useMemo(() => {
+    const totalFees = students.reduce(
+      (sum, s) => sum + (Number(s.feeTotal) || 0),
+      0,
+    );
+    const totalPaid = students.reduce(
+      (sum, s) => sum + (Number(s.feePaid) || 0),
+      0,
+    );
+    const totalPending = students.reduce((sum, s) => {
+      if (s.feeStatus === "Paid") return sum;
+      return sum + (Number(s.feePending) || 0);
+    }, 0);
+    const pct = totalFees > 0 ? Math.round((totalPaid / totalFees) * 100) : 0;
+    return { totalFees, totalPaid, totalPending, pct };
+  }, [students]);
+
+  const stats = [
+    {
+      label: "Total Students",
+      value: studentsLoaded ? students.length.toLocaleString("en-IN") : "…",
+      icon: Users,
+      bg: "bg-[#efe7fb]",
+      fg: "text-[#8c5cf0]",
+    },
+    {
+      label: "Total Teachers",
+      value: teacherCount === null ? "…" : teacherCount.toLocaleString("en-IN"),
+      icon: GraduationCap,
+      bg: "bg-[#e3f0fd]",
+      fg: "text-[#2f8fe0]",
+    },
+    ATTENDANCE_TODAY_PLACEHOLDER,
+    {
+      label: "Fees Collection",
+      value: studentsLoaded ? formatINR(feeSummary.totalPaid) : "…",
+      icon: FileText,
+      bg: "bg-[#fdecd8]",
+      fg: "text-[#f7941d]",
+    },
+  ];
 
   return (
     <div className="min-h-screen bg-[#f8f9fc] flex flex-col">
@@ -239,7 +285,7 @@ export default function AdminDashboard({ profile }) {
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-              {STATS.map(({ label, value, change, icon: Icon, bg, fg }) => (
+              {stats.map(({ label, value, change, icon: Icon, bg, fg }) => (
                 <div
                   key={label}
                   className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm"
@@ -257,9 +303,11 @@ export default function AdminDashboard({ profile }) {
                   <div className="text-2xl font-bold text-gray-900 mb-1">
                     {value}
                   </div>
-                  <div className="text-[12px] text-[#2fa860] font-medium">
-                    ↗ {change}
-                  </div>
+                  {change && (
+                    <div className="text-[12px] text-gray-400 font-medium">
+                      {change}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -423,25 +471,31 @@ export default function AdminDashboard({ profile }) {
                   </select>
                 </div>
                 <div className="text-xl font-bold text-gray-900">
-                  ₹12,45,300
+                  {studentsLoaded ? formatINR(feeSummary.totalPaid) : "…"}
                 </div>
                 <div className="text-[11px] text-gray-500 mb-2">
-                  75% of total fees
+                  {studentsLoaded ? `${feeSummary.pct}% of total fees` : ""}
                 </div>
                 <div className="h-2 rounded-full bg-gray-100 overflow-hidden mb-3">
                   <div
-                    className="h-full bg-[#2fa860]"
-                    style={{ width: "75%" }}
+                    className="h-full bg-[#2fa860] transition-all"
+                    style={{ width: `${studentsLoaded ? feeSummary.pct : 0}%` }}
                   />
                 </div>
                 <div className="flex justify-between text-[11.5px]">
                   <div>
                     <div className="text-gray-500">Total Fees</div>
-                    <div className="font-bold text-gray-900">₹16,60,000</div>
+                    <div className="font-bold text-gray-900">
+                      {studentsLoaded ? formatINR(feeSummary.totalFees) : "…"}
+                    </div>
                   </div>
                   <div className="text-right">
                     <div className="text-gray-500">Pending</div>
-                    <div className="font-bold text-gray-900">₹4,14,700</div>
+                    <div className="font-bold text-gray-900">
+                      {studentsLoaded
+                        ? formatINR(feeSummary.totalPending)
+                        : "…"}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -497,25 +551,37 @@ export default function AdminDashboard({ profile }) {
                   </button>
                 </div>
                 <div className="flex flex-col divide-y divide-gray-100">
-                  {RECENT_ACTIVITIES.map(
-                    ({ text, when, icon: Icon, bg, fg }, i) => (
-                      <div
-                        key={i}
-                        className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0"
-                      >
-                        <span
-                          className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${bg}`}
+                  {activities.length === 0 ? (
+                    <p className="text-[12.5px] text-gray-400 py-3">
+                      No recent activity yet.
+                    </p>
+                  ) : (
+                    activities.map((raw) => {
+                      const {
+                        text,
+                        icon: Icon,
+                        bg,
+                        fg,
+                      } = describeActivity(raw);
+                      return (
+                        <div
+                          key={raw.id}
+                          className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0"
                         >
-                          <Icon size={15} className={fg} />
-                        </span>
-                        <div className="min-w-0 flex-1 text-[12.5px] text-gray-600 truncate">
-                          {text}
+                          <span
+                            className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${bg}`}
+                          >
+                            <Icon size={15} className={fg} />
+                          </span>
+                          <div className="min-w-0 flex-1 text-[12.5px] text-gray-600 truncate">
+                            {text}
+                          </div>
+                          <div className="text-[11px] text-gray-400 shrink-0">
+                            {formatRelativeTime(raw.createdAt)}
+                          </div>
                         </div>
-                        <div className="text-[11px] text-gray-400 shrink-0">
-                          {when}
-                        </div>
-                      </div>
-                    ),
+                      );
+                    })
                   )}
                 </div>
               </div>
@@ -653,6 +719,12 @@ function AddAdminModal({ profile, onClose }) {
         status: "active",
         createdBy: profile?.uid || profile?.name || null,
         createdAt: serverTimestamp(),
+      });
+
+      await logActivity("admin_added", {
+        actorName: profile?.name,
+        targetName: form.name,
+        meta: { role: form.role },
       });
 
       setSuccess(true);

@@ -6,7 +6,6 @@ import {
   ArrowLeft,
   ArrowRight,
   Lock,
-  ShieldCheck,
   RefreshCcw,
   Copy,
   Check,
@@ -19,11 +18,8 @@ import DashboardSidebar from "@/dashboardcomponents/Dashboardsidebar";
 import DashboardTopbar from "@/dashboardcomponents/Dashboardtopbar";
 import { useAuth } from "@/context/AuthContext";
 import { db, createTeacherLogin, auth } from "@/lib/firebase";
-import {
-  collection,
-  addDoc,
-  serverTimestamp,
-} from "firebase/firestore";
+import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { logActivity } from "@/lib/activityLog";
 
 const STEPS = [
   { id: 1, label: "Basic Information" },
@@ -67,14 +63,7 @@ const CLASS_OPTIONS = [
   "8",
   "9",
   "10",
-  "11-Science",
-  "11-Commerce",
-  "11-Arts",
-  "12-Science",
-  "12-Commerce",
-  "12-Arts",
 ];
-
 const GENDER_OPTIONS = ["Male", "Female", "Other"];
 const MARITAL_OPTIONS = ["Single", "Married", "Divorced", "Widowed"];
 const EMPLOYMENT_TYPE_OPTIONS = [
@@ -91,6 +80,15 @@ const DEPARTMENT_OPTIONS = [
   "Senior Secondary",
 ];
 const BLOOD_GROUP_OPTIONS = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
+
+// ---- Sanitizers: numbers where numbers belong, letters where names belong ----
+function sanitizeAlpha(value) {
+  return value.replace(/[^a-zA-Z\s'.-]/g, "");
+}
+function sanitizeDigits(value, maxLen) {
+  const digits = value.replace(/\D/g, "");
+  return maxLen ? digits.slice(0, maxLen) : digits;
+}
 
 function generateDefaultPassword() {
   const year = new Date().getFullYear();
@@ -147,12 +145,16 @@ export default function AddTeacherPage() {
     setForm((f) => ({ ...f, [name]: value }));
   }
 
+  function isPhoneValid(val) {
+    return !val || /^\d{10}$/.test(val);
+  }
+
   function isStepValid(currentStep) {
     if (currentStep === 1) {
       return (
         form.fullName.trim() &&
         form.email.trim() &&
-        form.phone.trim() &&
+        /^\d{10}$/.test(form.phone) &&
         form.teacherId.trim() &&
         form.subject &&
         form.gender &&
@@ -165,7 +167,8 @@ export default function AddTeacherPage() {
         form.experience !== "" &&
         form.employmentType &&
         form.department &&
-        form.joiningDate
+        form.joiningDate &&
+        isPhoneValid(form.emergencyPhone)
       );
     }
     return true;
@@ -173,7 +176,9 @@ export default function AddTeacherPage() {
 
   function goNext() {
     if (!isStepValid(step)) {
-      setStepError("Please fill in all required fields before continuing.");
+      setStepError(
+        "Please fill in all required fields correctly before continuing (phone numbers must be exactly 10 digits).",
+      );
       return;
     }
     setStepError("");
@@ -223,8 +228,11 @@ export default function AddTeacherPage() {
         createdBy: profile?.uid || profile?.name,
       });
 
-      console.log("Current admin auth after createTeacherLogin:", auth.currentUser?.uid, auth.currentUser?.email);
-
+      console.log(
+        "Current admin auth after createTeacherLogin:",
+        auth.currentUser?.uid,
+        auth.currentUser?.email,
+      );
 
       await addDoc(collection(db, "teachers"), {
         ...form,
@@ -236,6 +244,13 @@ export default function AddTeacherPage() {
         createdBy: profile?.uid || profile?.name || null,
         createdAt: serverTimestamp(),
       });
+
+      await logActivity("teacher_added", {
+        actorName: profile?.name,
+        targetName: form.fullName,
+        meta: { subject: form.subject },
+      });
+
       setSuccess(true);
       setTimeout(() => {
         router.push("/dashboard/teachers");
@@ -456,6 +471,7 @@ function BasicInformationStep({ form, onChange }) {
           value={form.fullName}
           onChange={onChange}
           placeholder="Enter full name"
+          filter="alpha"
           required
         />
         <TextField
@@ -467,7 +483,7 @@ function BasicInformationStep({ form, onChange }) {
           placeholder="Enter email address"
           required
         />
-        <PhoneField value={form.phone} onChange={onChange} />
+        <PhoneField value={form.phone} onChange={onChange} required />
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
@@ -531,7 +547,16 @@ function TextField({
   placeholder,
   required,
   helper,
+  filter,
+  maxLength,
 }) {
+  function handleInputChange(e) {
+    let val = e.target.value;
+    if (filter === "alpha") val = sanitizeAlpha(val);
+    if (filter === "digits") val = sanitizeDigits(val, maxLength);
+    onChange({ target: { name, value: val } });
+  }
+
   return (
     <div>
       <label className="block text-[12px] font-semibold text-gray-900 mb-1.5">
@@ -541,9 +566,11 @@ function TextField({
         type={type}
         name={name}
         value={value}
-        onChange={onChange}
+        onChange={handleInputChange}
         placeholder={placeholder}
         required={required}
+        maxLength={maxLength}
+        inputMode={filter === "digits" ? "numeric" : undefined}
         className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 text-[13px] text-gray-900 bg-gray-50
                    placeholder:text-gray-400 outline-none focus:border-orange-500 focus:ring-4 focus:ring-orange-500/10"
       />
@@ -585,11 +612,24 @@ function SelectField({
   );
 }
 
-function PhoneField({ value, onChange }) {
+function PhoneField({
+  label = "Phone Number",
+  name = "phone",
+  value,
+  onChange,
+  required,
+}) {
+  function handlePhoneChange(e) {
+    const digitsOnly = sanitizeDigits(e.target.value, 10);
+    onChange({ target: { name, value: digitsOnly } });
+  }
+
+  const showWarning = value && value.length > 0 && value.length < 10;
+
   return (
     <div>
       <label className="block text-[12px] font-semibold text-gray-900 mb-1.5">
-        Phone Number <span className="text-red-500">*</span>
+        {label} {required && <span className="text-red-500">*</span>}
       </label>
       <div className="flex gap-2">
         <select
@@ -600,15 +640,25 @@ function PhoneField({ value, onChange }) {
         </select>
         <input
           type="tel"
-          name="phone"
-          value={value}
-          onChange={onChange}
-          required
-          placeholder="Enter phone number"
+          inputMode="numeric"
+          name={name}
+          value={value || ""}
+          onChange={handlePhoneChange}
+          required={required}
+          placeholder="10-digit number"
+          maxLength={10}
+          pattern="[0-9]{10}"
+          title="Enter exactly 10 digits"
           className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 text-[13px] text-gray-900 bg-gray-50
                      placeholder:text-gray-400 outline-none focus:border-orange-500 focus:ring-4 focus:ring-orange-500/10"
         />
       </div>
+      {showWarning && (
+        <p className="text-[11px] text-amber-600 mt-1">
+          {10 - value.length} more digit{10 - value.length !== 1 ? "s" : ""}{" "}
+          needed
+        </p>
+      )}
     </div>
   );
 }
@@ -770,7 +820,6 @@ function ProfessionalDetailsStep({ form, setForm, onChange }) {
         />
       </div>
 
-      {/* Class & Subject Mapping Builder */}
       <div className="mb-6 border-t border-gray-100 pt-5">
         <div className="flex items-center justify-between mb-3">
           <div>
@@ -876,6 +925,7 @@ function ProfessionalDetailsStep({ form, setForm, onChange }) {
           value={form.city}
           onChange={onChange}
           placeholder="Enter city"
+          filter="alpha"
         />
         <TextField
           label="State"
@@ -883,13 +933,16 @@ function ProfessionalDetailsStep({ form, setForm, onChange }) {
           value={form.state}
           onChange={onChange}
           placeholder="Enter state"
+          filter="alpha"
         />
         <TextField
           label="Pincode"
           name="pincode"
           value={form.pincode}
           onChange={onChange}
-          placeholder="Enter pincode"
+          placeholder="6-digit pincode"
+          filter="digits"
+          maxLength={6}
         />
       </div>
 
@@ -900,14 +953,13 @@ function ProfessionalDetailsStep({ form, setForm, onChange }) {
           value={form.emergencyName}
           onChange={onChange}
           placeholder="Contact name"
+          filter="alpha"
         />
-        <TextField
+        <PhoneField
           label="Emergency Contact Number"
           name="emergencyPhone"
-          type="tel"
           value={form.emergencyPhone}
           onChange={onChange}
-          placeholder="Contact number"
         />
         <SelectField
           label="Blood Group"

@@ -6,6 +6,7 @@ import DashboardTopbar from "@/dashboardcomponents/Dashboardtopbar";
 import Sidebar from "@/dashboardcomponents/Dashboardsidebar";
 import { useAuth } from "@/context/AuthContext";
 import { db, getClassTeacher } from "@/lib/firebase";
+import { logActivity } from "@/lib/activityLog";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import {
   ArrowLeft,
@@ -93,8 +94,8 @@ export default function StudentProfilePage() {
   const [classTeacherName, setClassTeacherName] = useState(null);
 
   useEffect(() => {
-    if (student?.className && student?.section) {
-      getClassTeacher(student.className, student.section).then((data) => {
+    if (student?.className) {
+      getClassTeacher(student.className).then((data) => {
         setClassTeacherName(data?.teacherName || null);
       });
     }
@@ -126,6 +127,11 @@ export default function StudentProfilePage() {
     try {
       await updateDoc(doc(db, "students", student.docId), {
         status: nextStatus,
+      });
+      await logActivity("student_status_changed", {
+        actorName: profile?.name,
+        targetName: student.fullName,
+        meta: { newStatus: nextStatus },
       });
       setStudent((s) => ({ ...s, status: nextStatus }));
     } catch (err) {
@@ -216,9 +222,8 @@ export default function StudentProfilePage() {
                         </span>
                       </div>
                       <p className="text-[13px] font-semibold text-gray-500 mb-2">
-                        Class {student.className || "-"}
-                        {student.section ? ` - ${student.section}` : ""} ·
-                        Admission No: {student.admissionNumber || "-"}
+                        Class {student.className || "-"} · Admission No:{" "}
+                        {student.admissionNumber || "-"}
                       </p>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 text-[12.5px] text-gray-600">
                         <span className="flex items-center gap-1.5">
@@ -332,9 +337,7 @@ export default function StudentProfilePage() {
                 ) : (
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
                     <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 sm:p-6">
-                      <h2 className="font-bold text-gray-900 mb-4">
-                        Class & Section
-                      </h2>
+                      <h2 className="font-bold text-gray-900 mb-4">Class</h2>
                       <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl">
                         <span className="w-9 h-9 rounded-lg bg-violet-50 text-violet-600 flex items-center justify-center shrink-0">
                           <GraduationCap size={16} />
@@ -344,10 +347,7 @@ export default function StudentProfilePage() {
                             Class {student.className || "-"}
                           </div>
                           <div className="text-[11.5px] text-gray-500">
-                            Section: {student.section || "-"}
-                          </div>
-                          <div className="text-[11.5px] text-gray-500">
-                            Class Teacher: {classTeacherName || "Not assigned"}
+                            Class Incharge: {classTeacherName || "Not assigned"}
                           </div>
                         </div>
                       </div>
